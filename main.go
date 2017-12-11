@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -46,8 +47,8 @@ type HttpContext struct {
 
 type WebServer struct {
 	consumer *nsq.Consumer
-	//TODO:
-	queue *Queue
+	srv      *http.Server
+	queue    *Queue
 }
 
 func GetInt(c *gin.Context, key string) int {
@@ -63,10 +64,19 @@ func GetDuration(c *gin.Context, key string) (time.Duration, error) {
 }
 
 func (w *WebServer) sub(c *gin.Context) {
+	st := w.consumer.Stats()
+	if st.MessagesReceived == st.MessagesFinished {
+		c.Status(http.StatusNotModified)
+		return
+	}
+
 	stopChan := make(chan struct{})
 	q := w.queue
 
 	limit := GetInt(c, "limit")
+	if limit == 0 {
+		limit = 1
+	}
 	timeout, err := GetDuration(c, "timeout")
 	if err != nil {
 		timeout, _ = time.ParseDuration("1s")
@@ -75,7 +85,9 @@ func (w *WebServer) sub(c *gin.Context) {
 		c, stopChan, limit, 0, time.Now(), timeout, bytes.NewBuffer(nil),
 	}
 
-	ctx.buf.WriteByte('[')
+	if limit > 1 {
+		ctx.buf.WriteByte('[')
+	}
 
 	q.PushBack(ctx)
 	<-stopChan
@@ -85,7 +97,9 @@ func (w *WebServer) sub(c *gin.Context) {
 		return
 	}
 
-	ctx.buf.WriteByte(']')
+	if limit > 1 {
+		ctx.buf.WriteByte(']')
+	}
 	c.Data(200, "hex", ctx.buf.Bytes())
 }
 
@@ -126,11 +140,17 @@ func (w *WebServer) Init() error {
 		}
 	}
 
-	w.queue = NewQueue()
+	w.queue = NewQueue(8)
 	return nil
 }
 
 func (w *WebServer) shutdown() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	srv := w.srv
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatal("Server Shutdown:", err)
+	}
 }
 
 func (w *WebServer) run() {
@@ -147,9 +167,11 @@ func (w *WebServer) run() {
 	if err := srv.ListenAndServe(); err != nil {
 		log.Printf("listen: %s\n", err)
 	}
+	w.srv = srv
 }
 
 func (w *WebServer) HandleMessage(m *nsq.Message) error {
+	fmt.Println("HandleMessage")
 	q := w.queue
 	v := q.PopFront()
 	if v == nil {
@@ -160,6 +182,8 @@ func (w *WebServer) HandleMessage(m *nsq.Message) error {
 		h.buf.WriteByte(',')
 	}
 	h.buf.Write(m.Body)
+	logrus.Println("[HandleMessage]", string(m.Body))
+	logrus.Println("[HandleMessage]", *h)
 	h.count++
 	if h.count == h.want || time.Now().Sub(h.start) >= h.timeout {
 		close(h.stop)
@@ -208,10 +232,16 @@ func main() {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
+
+	webRun := make(chan struct{})
 	go func() {
 		w.run()
 		wg.Done()
+		close(webRun)
 	}()
+
+	//wait webServe run
+	<-webRun
 
 	//graceful shutdown
 	closeevent.Wait(func(sig os.Signal) {

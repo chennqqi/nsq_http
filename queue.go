@@ -2,20 +2,22 @@ package main
 
 import (
 	"container/list"
+	"fmt"
 	"sync"
 )
 
 type Queue struct {
 	list   *list.List
 	mutext sync.Mutex
-	wg     sync.WaitGroup
+	ch     chan byte
 }
 
-func NewQueue() *Queue {
+func NewQueue(length int) *Queue {
 	var q Queue
 	l := list.New()
 	l.Init()
 	q.list = l
+	q.ch = make(chan byte, length)
 	return &q
 }
 
@@ -27,41 +29,45 @@ func (q *Queue) Len() int {
 }
 
 func (q *Queue) PopFront() interface{} {
+	fmt.Println("POPFRONT")
+	<-q.ch
 	q.mutext.Lock()
 	defer q.mutext.Unlock()
 	l := q.list
 	f := l.Front()
 	if f != nil {
-		q.wg.Done()
 		return l.Remove(f)
 	}
 	return nil
 }
 
 func (q *Queue) PopBack() interface{} {
+	fmt.Println("POPBACK")
+	<-q.ch
 	q.mutext.Lock()
 	defer q.mutext.Unlock()
 	l := q.list
 	f := l.Back()
 	if f != nil {
-		q.wg.Done()
 		return l.Remove(f)
 	}
 	return nil
 }
 
 func (q *Queue) PushFront(element interface{}) {
+	fmt.Println("PUSHFRONT")
 	q.mutext.Lock()
 	defer q.mutext.Unlock()
 	l := q.list
 	l.PushFront(element)
-	q.wg.Add(1)
+	q.ch <- '0'
 }
 
 func (q *Queue) PushBack(element interface{}) {
+	fmt.Println("PUSHBACK")
 	q.mutext.Lock()
 	defer q.mutext.Unlock()
 	l := q.list
 	l.PushBack(element)
-	q.wg.Add(1)
+	q.ch <- '0'
 }
