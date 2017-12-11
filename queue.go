@@ -8,6 +8,7 @@ import (
 type Queue struct {
 	list   *list.List
 	mutext sync.Mutex
+	wg     sync.WaitGroup
 }
 
 func NewQueue() *Queue {
@@ -31,6 +32,7 @@ func (q *Queue) PopFront() interface{} {
 	l := q.list
 	f := l.Front()
 	if f != nil {
+		q.wg.Done()
 		return l.Remove(f)
 	}
 	return nil
@@ -42,6 +44,7 @@ func (q *Queue) PopBack() interface{} {
 	l := q.list
 	f := l.Back()
 	if f != nil {
+		q.wg.Done()
 		return l.Remove(f)
 	}
 	return nil
@@ -52,6 +55,7 @@ func (q *Queue) PushFront(element interface{}) {
 	defer q.mutext.Unlock()
 	l := q.list
 	l.PushFront(element)
+	q.wg.Add(1)
 }
 
 func (q *Queue) PushBack(element interface{}) {
@@ -59,4 +63,5 @@ func (q *Queue) PushBack(element interface{}) {
 	defer q.mutext.Unlock()
 	l := q.list
 	l.PushBack(element)
+	q.wg.Add(1)
 }

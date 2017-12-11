@@ -30,8 +30,8 @@ var (
 )
 
 func init() {
+	flag.Var(&nsqdTCPAddrs, "nsqd-tcp-address", "nsqd TCP address (may be given multiple times)")
 	flag.Var(&lookupdHTTPAddrs, "lookupd-http-address", "lookupd HTTP address (may be given multiple times)")
-	flag.Var(&nsqdTCPAddrs, "lookupd-http-address", "lookupd HTTP address (may be given multiple times)")
 }
 
 type HttpContext struct {
@@ -104,13 +104,16 @@ func (w *WebServer) Init() error {
 	consumer, err := nsq.NewConsumer(*topic, *channel, nsqConfig)
 	if err != nil {
 		logrus.Error("[main:NsqGroup.Open] NewConsumer error ", err)
+		logrus.Println("[main:NsqGroup.Open] ", *topic, *channel)
 		return err
 	}
 
 	w.consumer = consumer
 	consumer.AddHandler(w)
 
-	err = connectToNSQAndLookupd(consumer, lookupdHTTPAddrs, nsqdTCPAddrs)
+	logrus.Println(lookupdHTTPAddrs)
+	logrus.Println(nsqdTCPAddrs)
+	err = connectToNSQAndLookupd(consumer, nsqdTCPAddrs, lookupdHTTPAddrs)
 	if err != nil {
 		logrus.Error("[main:NsqGroup.Open] ConnectToNSQLookupds error ", err)
 		return err
@@ -198,7 +201,11 @@ func main() {
 	}
 
 	var w WebServer
-	w.Init()
+	err := w.Init()
+	if err != nil {
+		log.Fatalf("Init error %v", err)
+	}
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
